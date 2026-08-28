@@ -1,3 +1,4 @@
+import express from 'express';
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
@@ -8,6 +9,12 @@ import qrcode from 'qrcode-terminal';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 import pino from 'pino';
 import fs from 'fs';
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => res.send('Bot do WhatsApp está rodando!'));
+app.listen(PORT, () => console.log(`Servidor HTTP ativo na porta ${PORT}`));
 
 const logger = pino({ level: 'silent' });
 const KEYWORD = '@bot';

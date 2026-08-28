@@ -1,14 +1,18 @@
 {
   "name": "whatsapp-sticker-bot",
-  "version": "1.0.0",
-  "description": "Bot de WhatsApp que converte imagens/vídeos em figurinhas automaticamente",
+  "version": "2.0.0",
+  "description": "Bot de WhatsApp que converte imagens em figurinhas automaticamente (usando Baileys)",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "whatsapp-web.js": "^1.26.0",
-    "qrcode-terminal": "^0.12.0"
+    "@whiskeysockets/baileys": "6.7.23",
+    "pino": "^9.4.0",
+    "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.35.4",
+    "wa-sticker-formatter": "^4.4.4"
   },
   "engines": {
     "node": ">=18"

@@ -1,74 +1,101 @@
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+  downloadMediaMessage,
+  fetchLatestBaileysVersion,
+} from '@whiskeysockets/baileys';
+import qrcode from 'qrcode-terminal';
+import { Sticker, StickerTypes } from 'wa-sticker-formatter';
+import pino from 'pino';
+import fs from 'fs';
 
-const client = new Client({
-  authStrategy: new LocalAuth({
-    dataPath: process.env.WWEBJS_AUTH_PATH || '.wwebjs_auth',
-  }),
-  puppeteer: {
-    headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-    ],
-  },
-});
+const logger = pino({ level: 'silent' });
+const KEYWORD = '@bot';
 
-client.on('qr', (qr) => {
-  console.log('Escaneie o QR Code abaixo com o WhatsApp do seu celular:');
-  qrcode.generate(qr, { small: true });
-});
-
-client.on('ready', () => {
-  console.log('✅ Bot conectado e pronto para transformar imagens em figurinhas!');
-});
-
-client.on('auth_failure', (msg) => {
-  console.error('❌ Falha na autenticação:', msg);
-});
-
-client.on('disconnected', (reason) => {
-  console.log('⚠️ Cliente desconectado:', reason);
-});
-
-const STICKER_CONFIG = {
-  sendMediaAsSticker: true,
-  stickerAuthor: 'Meu Bot',
-  stickerName: 'Figurinhas',
-  stickerCategories: ['🤖'],
+const STICKER_OPTIONS = {
+  pack: 'Figurinhas',
+  author: 'Meu Bot',
+  type: StickerTypes.FULL,
+  quality: 70,
 };
 
-client.on('message', async (msg) => {
-  try {
-    if (!msg.hasMedia) return;
+async function startBot() {
+  const authPath = process.env.WA_AUTH_PATH || './auth_info';
+  const { state, saveCreds } = await useMultiFileAuthState(authPath);
+  
+  // Busca a versão atual do WhatsApp Web para evitar rejeição na conexão
+  const { version } = await fetchLatestBaileysVersion();
 
-    const attachmentTypes = ['image', 'video'];
-    const messageType = msg.type; // 'image', 'video', 'sticker', etc.
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    logger,
+    browser: ['Ubuntu', 'Chrome', '20.0.04'],
+    printQRInTerminal: false,
+  });
 
-    if (!attachmentTypes.includes(messageType)) return;
+  sock.ev.on('creds.update', saveCreds);
 
-    const caption = (msg.body || '').toLowerCase();
-    const keywords = ['@Bot'];
-    if (!keywords.some((k) => caption.includes(k))) return;
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
-    console.log(`📩 Mídia recebida de ${msg.from}, convertendo em figurinha...`);
-
-    const media = await msg.downloadMedia();
-    if (!media) {
-      await msg.reply('❌ Não consegui baixar essa mídia, tenta enviar de novo.');
-      return;
+    if (qr) {
+      console.log('Escaneie o QR Code abaixo com o WhatsApp do seu celular:');
+      qrcode.generate(qr, { small: true });
     }
 
-    await client.sendMessage(msg.from, media, STICKER_CONFIG);
-    console.log(`✅ Figurinha enviada para ${msg.from}`);
-  } catch (err) {
-    console.error('Erro ao criar figurinha:', err);
-    try {
-      await msg.reply('❌ Ocorreu um erro ao criar a figurinha. Tenta novamente.');
-    } catch (_) {}
-  }
-});
+    if (connection === 'close') {
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-client.initialize();
+      console.log(`Conexão fechada. Código de status: ${statusCode || 'Desconhecido'}`);
+
+      if (isLoggedOut) {
+        console.log('❌ Sessão expirada ou deslogada. Limpando credenciais...');
+        if (fs.existsSync(authPath)) {
+          fs.rmSync(authPath, { recursive: true, force: true });
+        }
+        console.log('Reiniciando para gerar novo QR Code...');
+        setTimeout(startBot, 2000);
+      } else {
+        console.log('⚡ Reconectando em 3 segundos...');
+        setTimeout(startBot, 3000);
+      }
+    } else if (connection === 'open') {
+      console.log('✅ Bot conectado e pronto para transformar imagens em figurinhas!');
+    }
+  });
+
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return;
+
+    for (const msg of messages) {
+      try {
+        if (!msg.message) continue;
+
+        const jid = msg.key.remoteJid;
+        const imageMessage =
+          msg.message.imageMessage ||
+          msg.message.viewOnceMessageV2?.message?.imageMessage;
+
+        if (!imageMessage) continue;
+
+        const caption = (imageMessage.caption || '').toLowerCase();
+        if (!caption.includes(KEYWORD)) continue;
+
+        console.log(`📩 Imagem recebida de ${jid}, convertendo em figurinha...`);
+
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger });
+        const sticker = new Sticker(buffer, STICKER_OPTIONS);
+        const stickerBuffer = await sticker.toBuffer();
+
+        await sock.sendMessage(jid, { sticker: stickerBuffer });
+        console.log(`✅ Figurinha enviada para ${jid}`);
+      } catch (err) {
+        console.error('Erro ao criar figurinha:', err);
+      }
+    }
+  });
+}
+
+startBot();

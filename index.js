@@ -1,6 +1,7 @@
 import express from 'express';
 import makeWASocket, {
   useMultiFileAuthState,
+  makeCacheableSignalKeyStore,
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
@@ -14,7 +15,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => res.send('Bot do WhatsApp está rodando!'));
-app.listen(PORT, () => console.log(`Servidor HTTP ativo na porta ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Servidor HTTP ativo na porta ${PORT}`));
 
 const logger = pino({ level: 'silent' });
 const KEYWORD = '@bot';
@@ -30,15 +31,18 @@ async function startBot() {
   const authPath = process.env.WA_AUTH_PATH || './auth_info';
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
   
-  // Busca a versão atual do WhatsApp Web para evitar rejeição na conexão
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
     version,
-    auth: state,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger),
+    },
     logger,
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
     printQRInTerminal: false,
+    syncFullHistory: false,
   });
 
   sock.ev.on('creds.update', saveCreds);

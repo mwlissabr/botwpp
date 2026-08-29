@@ -78,9 +78,8 @@ async function startBot() {
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
     printQRInTerminal: false,
     syncFullHistory: false,
-    getMessage: async (key) => {
-      return { conversation: '' };
-    },
+    markOnlineOnConnect: false, // Evita forçar sincronização pesada ao conectar
+    getMessage: async () => ({ conversation: '' }),
   });
 
   sock.ev.on('creds.update', saveCreds);

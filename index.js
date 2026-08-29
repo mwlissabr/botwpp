@@ -6,13 +6,48 @@ import makeWASocket, {
   downloadMediaMessage,
   fetchLatestBaileysVersion,
 } from '@whiskeysockets/baileys';
-import qrcode from 'qrcode-terminal';
+import qrcodeTerminal from 'qrcode-terminal';
+import QRCode from 'qrcode';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 import pino from 'pino';
 import fs from 'fs';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Variável para armazenar o QR Code gerado
+let currentQR = null;
+
+// Rota HTTP para exibir o QR Code em imagem no navegador
+app.get('/qr', async (req, res) => {
+  if (!currentQR) {
+    return res.send(`
+      <html>
+        <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background-color:#f4f4f9;">
+          <h2>QR Code indisponível!</h2>
+          <p>O bot já está conectado ou o QR Code ainda está sendo gerado.</p>
+        </body>
+      </html>
+    `);
+  }
+
+  try {
+    const qrImageUrl = await QRCode.toDataURL(currentQR);
+    res.send(`
+      <html>
+        <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background-color:#f4f4f9;">
+          <h2 style="color:#333;">Escaneie o QR Code com o WhatsApp do seu celular</h2>
+          <div style="padding:20px;background:#fff;border-radius:10px;box-shadow:0 4px 8px rgba(0,0,0,0.1);">
+            <img src="${qrImageUrl}" alt="QR Code" style="width:300px;height:300px;" />
+          </div>
+          <p style="color:#666;margin-top:15px;">Atualize esta página se o QR Code expirar.</p>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    res.status(500).send('Erro ao converter QR Code para imagem');
+  }
+});
 
 app.get('/', (req, res) => res.send('Bot do WhatsApp está rodando!'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Servidor HTTP ativo na porta ${PORT}`));
@@ -43,6 +78,9 @@ async function startBot() {
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
     printQRInTerminal: false,
     syncFullHistory: false,
+    getMessage: async (key) => {
+      return { conversation: '' };
+    },
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -51,11 +89,14 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('Escaneie o QR Code abaixo com o WhatsApp do seu celular:');
-      qrcode.generate(qr, { small: true });
+      currentQR = qr;
+      console.log('📌 Novo QR Code gerado!');
+      console.log('👉 Acesse a rota /qr na URL do Render (ex: https://seu-app.onrender.com/qr) para escanear.');
+      qrcodeTerminal.generate(qr, { small: true });
     }
 
     if (connection === 'close') {
+      currentQR = null;
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
@@ -73,6 +114,7 @@ async function startBot() {
         setTimeout(startBot, 3000);
       }
     } else if (connection === 'open') {
+      currentQR = null;
       console.log('✅ Bot conectado e pronto para transformar imagens em figurinhas!');
     }
   });

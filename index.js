@@ -12,13 +12,22 @@ import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 import pino from 'pino';
 import fs from 'fs';
 
+// Previne que erros de criptografia da libsignal derrubem o processo
+process.on('uncaughtException', (err) => {
+  if (err?.message?.includes('Bad MAC')) return;
+  console.error('Erro não tratado:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  if (reason?.message?.includes('Bad MAC')) return;
+  console.error('Rejeição não tratada:', reason);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Variável para armazenar o QR Code gerado
 let currentQR = null;
 
-// Rota HTTP para exibir o QR Code em imagem no navegador
 app.get('/qr', async (req, res) => {
   if (!currentQR) {
     return res.send(`
@@ -49,7 +58,7 @@ app.get('/qr', async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => res.send('Bot do WhatsApp está rodando!'));
+app.get('/', (req, res) => res.send('Bot rodando perfeitamente!'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Servidor HTTP ativo na porta ${PORT}`));
 
 const logger = pino({ level: 'silent' });
@@ -65,7 +74,6 @@ const STICKER_OPTIONS = {
 async function startBot() {
   const authPath = process.env.WA_AUTH_PATH || './auth_info';
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
-  
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -78,19 +86,23 @@ async function startBot() {
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
     printQRInTerminal: false,
     syncFullHistory: false,
-    markOnlineOnConnect: false, // Evita forçar sincronização pesada ao conectar
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
+    retryRequestDelayMs: 250,
     getMessage: async () => ({ conversation: '' }),
   });
 
-  sock.ev.on('creds.update', saveCreds);
+  // Salva as credenciais aguardando a gravação em disco
+  sock.ev.on('creds.update', async () => {
+    await saveCreds();
+  });
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
       currentQR = qr;
-      console.log('📌 Novo QR Code gerado!');
-      console.log('👉 Acesse a rota /qr na URL do Render (ex: https://seu-app.onrender.com/qr) para escanear.');
+      console.log('📌 Novo QR Code gerado na rota /qr');
       qrcodeTerminal.generate(qr, { small: true });
     }
 
@@ -99,22 +111,21 @@ async function startBot() {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-      console.log(`Conexão fechada. Código de status: ${statusCode || 'Desconhecido'}`);
+      console.log(`Conexão fechada. Código: ${statusCode || 'Desconhecido'}`);
 
       if (isLoggedOut) {
-        console.log('❌ Sessão expirada ou deslogada. Limpando credenciais...');
+        console.log('❌ Sessão expirada. Apagando credenciais...');
         if (fs.existsSync(authPath)) {
           fs.rmSync(authPath, { recursive: true, force: true });
         }
-        console.log('Reiniciando para gerar novo QR Code...');
         setTimeout(startBot, 2000);
       } else {
-        console.log('⚡ Reconectando em 3 segundos...');
+        console.log('⚡ Reconectando...');
         setTimeout(startBot, 3000);
       }
     } else if (connection === 'open') {
       currentQR = null;
-      console.log('✅ Bot conectado e pronto para transformar imagens em figurinhas!');
+      console.log('✅ Bot conectado e pronto!');
     }
   });
 
@@ -135,7 +146,7 @@ async function startBot() {
         const caption = (imageMessage.caption || '').toLowerCase();
         if (!caption.includes(KEYWORD)) continue;
 
-        console.log(`📩 Imagem recebida de ${jid}, convertendo em figurinha...`);
+        console.log(`📩 Processando imagem de ${jid}...`);
 
         const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger });
         const sticker = new Sticker(buffer, STICKER_OPTIONS);
@@ -144,7 +155,7 @@ async function startBot() {
         await sock.sendMessage(jid, { sticker: stickerBuffer });
         console.log(`✅ Figurinha enviada para ${jid}`);
       } catch (err) {
-        console.error('Erro ao criar figurinha:', err);
+        console.error('Erro ao processar figurinha:', err.message);
       }
     }
   });

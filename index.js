@@ -11,6 +11,7 @@ import QRCode from 'qrcode';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 import pino from 'pino';
 import fs from 'fs';
+import crypto from 'crypto';
 
 // Previne que erros de criptografia da libsignal derrubem o processo
 process.on('uncaughtException', (err) => {
@@ -28,7 +29,29 @@ const PORT = process.env.PORT || 3000;
 
 let currentQR = null;
 
+// A rota /qr exige um token: sem ele, qualquer pessoa que achasse a URL
+// poderia escanear o QR e vincular o próprio WhatsApp ao seu bot.
+// Defina QR_TOKEN nas variáveis de ambiente do servidor. Se não definir,
+// um token aleatório é gerado a cada inicialização e mostrado no log.
+const QR_TOKEN = process.env.QR_TOKEN || crypto.randomBytes(16).toString('hex');
+if (!process.env.QR_TOKEN) {
+  console.log(`🔑 QR_TOKEN não definido. Token temporário: ${QR_TOKEN}`);
+}
+
+function tokenValido(recebido) {
+  if (typeof recebido !== 'string') return false;
+  const a = Buffer.from(recebido);
+  const b = Buffer.from(QR_TOKEN);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 app.get('/qr', async (req, res) => {
+  if (!tokenValido(req.query.token)) {
+    return res.status(404).send('Not found');
+  }
+
+  res.set('Cache-Control', 'no-store');
+
   if (!currentQR) {
     return res.send(`
       <html>

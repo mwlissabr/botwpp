@@ -1,0 +1,15 @@
+# Dependências (reinstaladas com `npm install` a partir do package-lock.json)
+node_modules/
+
+# Sessão do WhatsApp: dá acesso total à conta vinculada. NUNCA versionar.
+auth_info/
+auth_info*/
+*.creds.json
+
+# Variáveis de ambiente e segredos
+.env
+.env.*
+
+# Logs
+*.log
+npm-debug.log*
